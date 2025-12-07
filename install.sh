@@ -123,7 +123,7 @@ main() {
     TOKEN=""
     FAKE="1"
     INTERVAL="1000"
-    TLS_FLAG=""
+    TLS_FLAG="true"
     IGNORE_CERT_FLAG=""
     TERMINAL_FLAG="" # <-- 新增: 为 --terminal 参数初始化一个标志变量
 
