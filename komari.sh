@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #================================================================================
-# Komari Monitor RS 安装脚本（修正版）
+# Komari Monitor RS 安装脚本（安全加固版）
 #
 # 功能:
 #   - 检查 Root 权限 & systemd
@@ -13,8 +13,9 @@
 # 重要说明:
 #   - 默认在 HTTPS / WSS 场景下 自动开启 --tls
 #   - 若 WS 使用 wss:// 且你忘了写 --tls，会自动补上，解决常见 wss 连接问题
+#   - [安全加固]: 已彻底移除所有 Web Terminal (WebSSH) 相关的下发参数支持
 #
-# GitHub 仓库: https://github.com/GenshinMinecraft/komari-monitor-rs
+# GitHub 仓库: https://github.com/Mrlee2333/komari-monitor-rs
 #================================================================================
 
 set -euo pipefail
@@ -22,7 +23,7 @@ set -euo pipefail
 # --- 配置 ---
 
 # GitHub 仓库信息
-GITHUB_REPO="GenshinMinecraft/komari-monitor-rs"
+GITHUB_REPO="Mrlee2333/komari-monitor-rs"
 
 # 安装路径
 INSTALL_PATH="/usr/local/bin/komari-monitor-rs"
@@ -206,8 +207,6 @@ create_or_update_service() {
     local interval="$5"
     local tls_flag="$6"
     local ignore_cert_flag="$7"
-    local terminal_enabled="$8"
-    local terminal_entry="$9"
 
     log_info "正在创建 / 更新 systemd 服务: ${SERVICE_NAME}"
 
@@ -224,9 +223,6 @@ create_or_update_service() {
     fi
     if [ -n "${ignore_cert_flag}" ]; then
         exec_start_cmd="${exec_start_cmd} ${ignore_cert_flag}"
-    fi
-    if [ "${terminal_enabled}" = "1" ]; then
-        exec_start_cmd="${exec_start_cmd} --terminal --terminal-entry=${terminal_entry}"
     fi
 
     # 若已有服务，先尝试停止（为覆盖安装铺路）
@@ -292,10 +288,6 @@ main() {
     local TLS_AUTO=1
     local IGNORE_CERT_FLAG=""
 
-    # Web Terminal (webssh) 相关
-    local TERMINAL_ENABLED=0
-    local TERMINAL_ENTRY_VALUE="default"
-
     # 解析命令行参数
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -321,12 +313,6 @@ main() {
             --ignore-unsafe-cert)
                 IGNORE_CERT_FLAG="--ignore-unsafe-cert"
                 shift 1;;
-            --terminal)
-                TERMINAL_ENABLED=1
-                shift 1;;
-            --terminal-entry)
-                TERMINAL_ENTRY_VALUE="$2"
-                shift 2;;
             *)
                 log_warn "未知的参数: $1"
                 shift 1;;
@@ -347,19 +333,6 @@ main() {
     if [ -z "${HTTP_SERVER}" ] || [ -z "${WS_SERVER}" ] || [ -z "${TOKEN}" ]; then
         log_error "Http 地址、WebSocket 地址和 Token 不能为空。"
         exit 1
-    fi
-
-    # 交互启用 Web Terminal（若未通过参数开启）
-    if [ "${TERMINAL_ENABLED}" -eq 0 ]; then
-        read -p "是否启用 Web Terminal 功能（webssh）? (y/N): " enable_terminal
-        enable_terminal=$(echo "${enable_terminal}" | tr '[:upper:]' '[:lower:]')
-        if [[ "${enable_terminal}" == "y" || "${enable_terminal}" == "yes" ]]; then
-            TERMINAL_ENABLED=1
-            read -p "可选：自定义 Terminal Entry (默认 default，直接回车跳过): " entry
-            if [ -n "${entry}" ]; then
-                TERMINAL_ENTRY_VALUE="${entry}"
-            fi
-        fi
     fi
 
     # --- 自动 TLS 逻辑：修复常见 wss 问题 ---
@@ -384,11 +357,7 @@ main() {
     echo "  - 上传间隔:      ${INTERVAL} ms"
     echo "  - 启用 TLS:      ${TLS_FLAG:-未启用}"
     echo "  - 忽略证书校验:  ${IGNORE_CERT_FLAG:-未启用}"
-    if [ "${TERMINAL_ENABLED}" -eq 1 ]; then
-        echo "  - Web Terminal:  启用 (entry = ${TERMINAL_ENTRY_VALUE})"
-    else
-        echo "  - Web Terminal:  未启用"
-    fi
+    echo "  - Web Terminal:  彻底移除 (安全加固)"
     echo ""
 
     # 下载 / 覆盖安装二进制
@@ -402,9 +371,7 @@ main() {
         "${FAKE}" \
         "${INTERVAL}" \
         "${TLS_FLAG}" \
-        "${IGNORE_CERT_FLAG}" \
-        "${TERMINAL_ENABLED}" \
-        "${TERMINAL_ENTRY_VALUE}"
+        "${IGNORE_CERT_FLAG}"
 }
 
 main "$@"
