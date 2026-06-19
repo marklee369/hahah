@@ -1,10 +1,11 @@
 #!/bin/bash
 
 #================================================================================
-# Komari Monitor RS 安装脚本（安全加固版）
+# Komari Monitor RS 安装脚本（安全加固 + 自动纯净安装版）
 #
 # 功能:
 #   - 检查 Root 权限 & systemd
+#   - 自动检测并卸载旧版残留 (服务停用、文件清理)
 #   - 自动安装依赖 (wget 或 curl)
 #   - 自动检测系统架构并下载对应程序
 #   - 根据命令行参数或交互配置 Agent
@@ -64,6 +65,40 @@ check_root() {
     if ! command -v systemctl >/dev/null 2>&1; then
         log_error "未检测到 systemctl，此脚本仅支持使用 systemd 的发行版（如 Debian/Ubuntu 等）。"
         exit 1
+    fi
+}
+
+# --- 卸载旧版 ---
+
+uninstall_old_version() {
+    if [ -f "${INSTALL_PATH}" ] || [ -f "${SERVICE_FILE}" ]; then
+        log_info "检测到已安装的 komari-monitor-rs，正在执行安全卸载..."
+
+        # 1. 停止并禁用旧服务
+        if systemctl is-active --quiet "${SERVICE_NAME}"; then
+            log_info "正在停止运行中的服务..."
+            systemctl stop "${SERVICE_NAME}" || log_warn "停止服务失败，可能已经停止。"
+        fi
+        
+        if systemctl is-enabled --quiet "${SERVICE_NAME}" 2>/dev/null; then
+            log_info "正在禁用开机自启..."
+            systemctl disable "${SERVICE_NAME}" || true
+        fi
+
+        # 2. 删除 systemd 服务文件并重载
+        if [ -f "${SERVICE_FILE}" ]; then
+            rm -f "${SERVICE_FILE}"
+            systemctl daemon-reload
+            log_info "已删除旧版服务文件: ${SERVICE_FILE}"
+        fi
+
+        # 3. 删除二进制可执行文件
+        if [ -f "${INSTALL_PATH}" ]; then
+            rm -f "${INSTALL_PATH}"
+            log_info "已删除旧版二进制文件: ${INSTALL_PATH}"
+        fi
+
+        log_info "旧版清理完成，环境已准备就绪。"
     fi
 }
 
@@ -167,12 +202,6 @@ download_binary() {
     local tmp_file
     tmp_file=$(mktemp -t komari-monitor-rs.XXXXXX)
 
-    # 如果服务正在运行，先尝试停掉，方便覆盖安装
-    if systemctl is-active --quiet "${SERVICE_NAME}"; then
-        log_info "检测到正在运行的服务 ${SERVICE_NAME}，尝试先停止以便覆盖安装..."
-        systemctl stop "${SERVICE_NAME}" || log_warn "停止服务失败，将继续尝试覆盖安装。"
-    fi
-
     # 先用（可能带代理的）地址下载，不行再回退直连
     if ! _do_download "${download_url}" "${tmp_file}"; then
         log_warn "通过 ${download_url} 下载失败。"
@@ -190,7 +219,7 @@ download_binary() {
         fi
     fi
 
-    # 使用 install 原子覆盖，解决“不能覆盖安装”的问题
+    # 使用 install 原子覆盖安装
     install -m 755 "${tmp_file}" "${INSTALL_PATH}"
     rm -f "${tmp_file}"
 
@@ -208,7 +237,7 @@ create_or_update_service() {
     local tls_flag="$6"
     local ignore_cert_flag="$7"
 
-    log_info "正在创建 / 更新 systemd 服务: ${SERVICE_NAME}"
+    log_info "正在创建 systemd 服务: ${SERVICE_NAME}"
 
     # 使用 --option=value 形式，避免 ExecStart 引号转义问题
     local exec_start_cmd="${INSTALL_PATH}"
@@ -223,12 +252,6 @@ create_or_update_service() {
     fi
     if [ -n "${ignore_cert_flag}" ]; then
         exec_start_cmd="${exec_start_cmd} ${ignore_cert_flag}"
-    fi
-
-    # 若已有服务，先尝试停止（为覆盖安装铺路）
-    if systemctl is-active --quiet "${SERVICE_NAME}"; then
-        log_info "检测到已有运行中的服务 '${SERVICE_NAME}'，正在停止以便更新..."
-        systemctl stop "${SERVICE_NAME}" || log_warn "停止服务失败，将继续尝试更新。"
     fi
 
     cat > "${SERVICE_FILE}" <<EOF
@@ -254,7 +277,7 @@ EOF
     log_info "正在重载 systemd 配置并启用服务..."
     systemctl daemon-reload
     systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1 || log_warn "启用服务时出现提示（通常是已启用），可以忽略。"
-    systemctl restart "${SERVICE_NAME}"
+    systemctl start "${SERVICE_NAME}"
 
     sleep 2
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
@@ -360,7 +383,10 @@ main() {
     echo "  - Web Terminal:  彻底移除 (安全加固)"
     echo ""
 
-    # 下载 / 覆盖安装二进制
+    # 清理旧版本环境
+    uninstall_old_version
+
+    # 下载 / 安装二进制
     download_binary
 
     # 创建 / 更新 systemd 服务
